@@ -24,6 +24,7 @@
 #include "edm4hep/ReconstructedParticleCollection.h"
 #include "edm4hep/TrackCollection.h"
 #include "edm4hep/TrackerHit.h"
+#include "edm4hep/utils/vector_utils.h"
 
 #include "Helpers.h"
 #include "Shower.h"
@@ -103,26 +104,23 @@ PreprocessedData DataPreprocessing::extract() const {
   }
 
   // extract track information
-  int trackIndex = 0;
-  for (const auto& track : tracks_) {
+  for (int trackIndex = 0; trackIndex < static_cast<int>(tracks_.size()); ++trackIndex) {
+    const auto track = tracks_[trackIndex];
 
-    auto trackstate = track.getTrackStates()[0];
-    float omega = trackstate.omega;
-    float phi = trackstate.phi;
-    float tanLambda = trackstate.tanLambda;
+    // tracks without a state at the IP or at the calorimeter cannot be used as graph nodes
+    const auto trackstate_ip = track.getTrackState(edm4hep::TrackState::AtIP);
+    const auto trackstate_calo = track.getTrackState(edm4hep::TrackState::AtCalorimeter);
+    if (!trackstate_ip || !trackstate_calo) {
+      continue;
+    }
 
-    float pt = 2.99792e-4f * std::abs(bFieldTesla_ / omega);
-    float px = std::cos(phi) * pt;
-    float py = std::sin(phi) * pt;
-    float pz = tanLambda * pt;
-    float p = std::sqrt(px * px + py * py + pz * pz);
+    float p = edm4hep::utils::magnitude(momentumFromTrackState(*trackstate_ip, bFieldTesla_));
 
     features["p_tracks"].push_back(p);
     features["e_tracks"].push_back(0);
 
     // also add features for trackstate at calo
-    auto trackstate_calo = track.getTrackStates()[3];
-    auto referencePoint_calo = trackstate_calo.referencePoint;
+    auto referencePoint_calo = trackstate_calo->referencePoint;
 
     float x_c = referencePoint_calo.x;
     float y_c = referencePoint_calo.y;
@@ -136,8 +134,6 @@ PreprocessedData DataPreprocessing::extract() const {
     features["hit_type_feature_track"].push_back(htype_c);
 
     hit_mapping.push_back({htype_c, collectionIndex, trackIndex});
-
-    trackIndex += 1;
   }
 
   features["node_energy"] = features["e_hits"];
@@ -330,8 +326,9 @@ std::vector<PropertyInputs> DataPreprocessing::prepare_prop(std::vector<Shower> 
     float mean_y = mean_var(pos_y);
     float mean_z = mean_var(pos_z);
 
-    float eta = calculate_eta(mean_x, mean_y, mean_z);
-    float phi = calculate_phi(mean_x, mean_y);
+    const edm4hep::Vector3f mean_pos{mean_x, mean_y, mean_z};
+    float eta = edm4hep::utils::eta(mean_pos);
+    float phi = edm4hep::utils::angleAzimuthal(mean_pos);
 
     // add the global features
 

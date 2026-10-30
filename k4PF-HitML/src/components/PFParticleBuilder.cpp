@@ -18,10 +18,12 @@
  */
 #include "PFParticleBuilder.h"
 
+#include "Helpers.h"
 #include "Shower.h"
 
 #include "edm4hep/Track.h"
 #include "edm4hep/TrackState.h"
+#include "edm4hep/utils/vector_utils.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -114,16 +116,6 @@ PIDPrediction decodePIDLogits(const std::vector<float>& logits, const std::vecto
   return pred;
 }
 
-static edm4hep::Vector3f momentumFromTrackState(const edm4hep::TrackState& ts, float bFieldTesla) {
-  const float pt = 2.99792e-4f * std::abs(bFieldTesla / ts.omega);
-  const float px = std::cos(ts.phi) * pt;
-  const float py = std::sin(ts.phi) * pt;
-  const float pz = ts.tanLambda * pt;
-  return {px, py, pz};
-}
-
-static float momentumMagnitude(const edm4hep::Vector3f& p) { return std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z); }
-
 static const edm4hep::Track& pickBestTrack(const Shower& shower) {
   const auto& tracks = shower.getTracks();
   if (tracks.empty()) {
@@ -169,7 +161,7 @@ static edm4hep::Vector3f energyWeightedBarycenter(const std::vector<edm4hep::Cal
 
 // like Pandora (DDPfoCreator::CalculateTrackBasedReferencePoint), no-sibling branch
 static edm4hep::Vector3f trackReferencePoint(const edm4hep::Track& trk) {
-  const auto& ts = trk.getTrackStates()[0]; // AtIP
+  const auto ts = trk.getTrackState(edm4hep::TrackState::AtIP).value();
   return {ts.D0 * std::cos(ts.phi), ts.D0 * std::sin(ts.phi), ts.Z0};
 }
 
@@ -179,10 +171,10 @@ ParticleRecoInfo buildChargedRecoInfo(const Shower& shower, int predictedClass, 
 
   const auto& trk = pickBestTrack(shower);
   out.tracks = {trk};
-  const auto& ts = trk.getTrackStates()[0]; // AtIP -- momentum, matches Python's pos_pxpypz_at_vertex
+  const auto ts = trk.getTrackState(edm4hep::TrackState::AtIP).value(); // matches Python's pos_pxpypz_at_vertex
 
   const auto p3 = momentumFromTrackState(ts, bFieldTesla);
-  const float p = momentumMagnitude(p3);
+  const float p = edm4hep::utils::magnitude(p3);
 
   // reassign low momentum muon to CH
   int effectiveClass = predictedClass;
@@ -223,6 +215,7 @@ void fillRecoParticle(edm4hep::ReconstructedParticleCollection& pfParticles,
   rp.setGoodnessOfPID(recoInfo.pidScore);
   rp.setPDG(recoInfo.pdg);
 
+  pid.setParticle(rp);
   pid.setLikelihood(recoInfo.pidScore);
   pid.setType(recoInfo.physicsClass);
   pid.setPDG(recoInfo.pdg);
